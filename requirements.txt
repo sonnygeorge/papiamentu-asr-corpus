@@ -1,0 +1,6 @@
+resemblyzer
+pyaudio
+numpy
+pandas
+matplotlib
+joblib
