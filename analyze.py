@@ -24,7 +24,7 @@ COLOR_BY_SPEAKER = {
     "male_mark_main": "indigo",
 }
 
-SPLIT_BY_SPEAKER = {
+SPEAKERS_BY_SPLIT = {
     "train": [
         "Nydia Ecury",
         "KompasKorsou",
@@ -80,8 +80,8 @@ def draw_umap_separated_by_speaker(u: np.ndarray, speaker_labels: np.ndarray):
     # Calculate height ratios for each subplot
     height_ratios = [
         height_multipliers[speaker]
-        for group in SPLIT_BY_SPEAKER
-        for speaker in SPLIT_BY_SPEAKER[group]
+        for group in SPEAKERS_BY_SPLIT
+        for speaker in SPEAKERS_BY_SPLIT[group]
     ]
     # Create figure and GridSpec with custom heights
     fig = plt.figure(figsize=(12 + 1, 0.7 * sum(height_ratios) + 1.5))
@@ -93,7 +93,7 @@ def draw_umap_separated_by_speaker(u: np.ndarray, speaker_labels: np.ndarray):
         "test": "lavenderblush",
     }
     for group in ["train", "dev", "test"]:
-        speakers_in_group = SPLIT_BY_SPEAKER[group]
+        speakers_in_group = SPEAKERS_BY_SPLIT[group]
         for idx, speaker in enumerate(speakers_in_group):
             speaker_u = u[speaker_labels == speaker]
             n_obs = speaker_u.shape[0]
