@@ -1,0 +1,9 @@
+BAD_UTTERANCES = [
+    104044102,
+    127071202,
+]
+
+UTTERANCES_TO_IGNORE_IN_CLUSTERING = [
+    101266301,  # matthew_main
+    103230301,  # double speaker
+]
