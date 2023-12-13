@@ -1,5 +1,6 @@
 from typing import List, Tuple, Dict, Optional
-from collections import Counter
+from collections import Counter, defaultdict
+import os
 
 import numpy as np
 import pandas as pd
@@ -21,8 +22,13 @@ from spectralcluster import (
     ICASSP2018_REFINEMENT_SEQUENCE,
 )
 
-RANDOM_SEED = 42
-N_BIBLE_SAMPLES = 2000
+from lists import UTTERANCES_TO_IGNORE_IN_CLUSTERING, BAD_UTTERANCES
+from plot_diarization import plot_diarization
+
+RANDOM_SEED = 50  # 42
+EXCLUDE_PITO = True
+np.random.seed(RANDOM_SEED)
+N_BIBLE_SAMPLES = None
 KNOWN_SPEAKERS = {  # Some quick hand-labeling
     104010101: "male_john_main",
     104010201: "male_john_main",
@@ -49,42 +55,42 @@ KNOWN_SPEAKERS = {  # Some quick hand-labeling
     104012702: "ndst",
     104013001: "ndst",
     104013101: "ndst",
-    101050301: "jesus_main",
-    101050401: "jesus_main",
-    101050501: "jesus_main",
-    101050601: "jesus_main",
-    101050701: "jesus_main",
-    101050801: "jesus_main",
-    101050901: "jesus_main",
-    101051001: "jesus_main",
-    101051101: "jesus_main",
-    101051201: "jesus_main",
-    101051301: "jesus_main",
-    101051401: "jesus_main",
-    101051501: "jesus_main",
-    101051601: "jesus_main",
-    101051701: "jesus_main",
-    101051801: "jesus_main",
-    101051901: "jesus_main",
-    101052001: "jesus_main",
-    101052101: "jesus_main",
-    101052201: "jesus_main",
-    101052301: "jesus_main",
-    101052401: "jesus_main",
-    101052501: "jesus_main",
-    101052601: "jesus_main",
-    101052701: "jesus_main",
-    101052801: "jesus_main",
-    101052901: "jesus_main",
-    101053001: "jesus_main",
-    101053101: "jesus_main",
-    101053201: "jesus_main",
-    101053301: "jesus_main",
-    101053401: "jesus_main",
-    101053501: "jesus_main",
-    101053601: "jesus_main",
-    101053701: "jesus_main",
-    101061302: "jesus_main",
+    101050301: "male_jesus_main",
+    101050401: "male_jesus_main",
+    101050501: "male_jesus_main",
+    101050601: "male_jesus_main",
+    101050701: "male_jesus_main",
+    101050801: "male_jesus_main",
+    101050901: "male_jesus_main",
+    101051001: "male_jesus_main",
+    101051101: "male_jesus_main",
+    101051201: "male_jesus_main",
+    101051301: "male_jesus_main",
+    101051401: "male_jesus_main",
+    101051501: "male_jesus_main",
+    101051601: "male_jesus_main",
+    101051701: "male_jesus_main",
+    101051801: "male_jesus_main",
+    101051901: "male_jesus_main",
+    101052001: "male_jesus_main",
+    101052101: "male_jesus_main",
+    101052201: "male_jesus_main",
+    101052301: "male_jesus_main",
+    101052401: "male_jesus_main",
+    101052501: "male_jesus_main",
+    101052601: "male_jesus_main",
+    101052701: "male_jesus_main",
+    101052801: "male_jesus_main",
+    101052901: "male_jesus_main",
+    101053001: "male_jesus_main",
+    101053101: "male_jesus_main",
+    101053201: "male_jesus_main",
+    101053301: "male_jesus_main",
+    101053401: "male_jesus_main",
+    101053501: "male_jesus_main",
+    101053601: "male_jesus_main",
+    101053701: "male_jesus_main",
+    101061302: "male_jesus_main",
     101041601: "ang",
     101041602: "ang",
     101012101: "god",
@@ -126,6 +132,8 @@ KNOWN_SPEAKERS = {  # Some quick hand-labeling
     119132101: "female_hebrews_main",
     103030001: "female_hebrews_main",
     101030001: "female_hebrews_main",
+    119132103: "female_hebrews_main",
+    103030001: "female_hebrews_main",
     102060101: "male_mark_main",
     102060102: "male_mark_main",
     102060303: "male_mark_main",
@@ -238,8 +246,8 @@ KNOWN_SPEAKERS = {  # Some quick hand-labeling
 
 CLASS_WEIGHTS = {
     "male_matthew_main": 1.09649,
-    "other": 0.15,
-    "jesus_main": 0.5952,
+    "_other_": 0.15,
+    "male_jesus_main": 0.5952,
     "male_mark_main": 1.98,
     "male_acts_main": 3.4,
     "male_luke_main": 2.60416,
@@ -266,6 +274,10 @@ STD_SCALER.fit(_X)
 @cache
 def load_data(use_known_speakers: bool = False) -> pd.DataFrame:
     bible_df = _DF[_DF["utterance_id"] < 200000000]
+    bible_df = bible_df[~bible_df["utterance_id"].isin(BAD_UTTERANCES)]
+    bible_df = bible_df[
+        ~bible_df["utterance_id"].isin(UTTERANCES_TO_IGNORE_IN_CLUSTERING)
+    ]
     known_speakers_df = bible_df[bible_df["utterance_id"].isin(KNOWN_SPEAKERS.keys())]
     if use_known_speakers:
         bible_df = known_speakers_df
@@ -273,8 +285,12 @@ def load_data(use_known_speakers: bool = False) -> pd.DataFrame:
         if N_BIBLE_SAMPLES is not None:
             bible_df = bible_df.sample(n=N_BIBLE_SAMPLES, random_state=RANDOM_SEED)
         bible_df = pd.concat([bible_df, known_speakers_df])
-    pito_df = _DF[_DF["speaker"] == "Pito Salas"]
-    return pd.concat([bible_df, pito_df])
+        bible_df = bible_df.drop_duplicates(subset="utterance_id")
+    if not EXCLUDE_PITO:
+        pito_df = _DF[_DF["speaker"] == "Pito Salas"]
+        return pd.concat([bible_df, pito_df])
+    else:
+        return bible_df
 
 
 @cache
@@ -286,7 +302,7 @@ def get_speaker(utterance_id: int) -> str:
         ):
             return KNOWN_SPEAKERS[utterance_id]
         else:
-            return "other"
+            return "_other_"
     else:
         return "pito"
 
@@ -316,13 +332,16 @@ def get_importances() -> Tuple[np.ndarray, np.ndarray, pd.Series]:
     return importances, X, y
 
 
-def play_fast_snippet_of_wav(fpath: str) -> None:
+def play_fast_snippet_of_wav(
+    fpath: str, begin_ms: int = 1000, end_ms: int = 3000, speed: float = 1.9
+) -> None:
     try:
         # Load the file with pydub
         audio = AudioSegment.from_file(fpath)
         if len(audio) > 2500:
-            audio = audio[1000:3500]
-        audio = audio.speedup(playback_speed=1.5)
+            audio = audio[begin_ms:end_ms]
+        if speed is not None and speed != 1:
+            audio = audio.speedup(playback_speed=speed)
         audio = audio.fade_in(200).fade_out(200)
         # Convert the PyDub AudioSegment to a NumPy array for playback
         samples = np.array(audio.get_array_of_samples())
@@ -391,14 +410,15 @@ def spectral_cluster(
     return labels, clusterer
 
 
-def get_bible_f1s(df: pd.DataFrame) -> dict:
+def get_bible_f1s_and_clusters(df: pd.DataFrame) -> Tuple[dict, dict]:
     assert "cluster" in df.columns
     known_ids = set(KNOWN_SPEAKERS.keys())  # Filter to known bible speakers
     df = df[df["utterance_id"].isin(known_ids)].copy()
     df["speaker_class"] = df["utterance_id"].apply(get_speaker)
     bible_f1s = {}
+    bible_clusters = {}
     for speaker, group in df.groupby("speaker_class"):
-        if speaker == "other":
+        if speaker == "_other_":
             continue
         speaker_cluster = group["cluster"].value_counts().index[0]
         if speaker_cluster == -1:
@@ -409,35 +429,41 @@ def get_bible_f1s(df: pd.DataFrame) -> dict:
         fn = len(df[df["cluster"] == speaker_cluster]) - tp
         f1 = tp / (tp + 0.5 * (fp + fn))
         bible_f1s[speaker] = f1
-    return bible_f1s
+        bible_clusters[speaker] = speaker_cluster
+    return bible_f1s, bible_clusters
 
 
 def get_results_info(predicted_clusters: List[int], df: pd.DataFrame) -> tuple:
     df["cluster"] = predicted_clusters
-    bible_f1s = get_bible_f1s(df)
+    bible_f1s, bible_clusters = get_bible_f1s_and_clusters(df)
     df["is_pito"] = df["speaker"].apply(lambda x: "Pito" in x)
-    pito_cluster = df[df["is_pito"]]["cluster"].value_counts().index[0]
-    if pito_cluster == -1:
-        pito_cluster = df[df["is_pito"]]["cluster"].value_counts().index[1]
-    df["is_pito_most_common_cluster"] = df["cluster"] == pito_cluster
-    f1 = f1_score(df["is_pito"], df["is_pito_most_common_cluster"])
-    confusion_dict = {
-        "TP": df[
-            (df["is_pito"] == True) & (df["is_pito_most_common_cluster"] == True)
-        ].shape[0],
-        "TN": df[
-            (df["is_pito"] == False) & (df["is_pito_most_common_cluster"] == False)
-        ].shape[0],
-        "FP": df[
-            (df["is_pito"] == False) & (df["is_pito_most_common_cluster"] == True)
-        ].shape[0],
-        "FN": df[
-            (df["is_pito"] == True) & (df["is_pito_most_common_cluster"] == False)
-        ].shape[0],
-    }
-    all_f1s = list(bible_f1s.values()) + [f1]
+    if EXCLUDE_PITO:
+        pito_cluster = None
+        confusion_dict = None
+        all_f1s = list(bible_f1s.values())
+    else:
+        pito_cluster = df[df["is_pito"]]["cluster"].value_counts().index[0]
+        if pito_cluster == -1:
+            pito_cluster = df[df["is_pito"]]["cluster"].value_counts().index[1]
+        df["is_pito_most_common_cluster"] = df["cluster"] == pito_cluster
+        pito_f1 = f1_score(df["is_pito"], df["is_pito_most_common_cluster"])
+        confusion_dict = {
+            "TP": df[
+                (df["is_pito"] == True) & (df["is_pito_most_common_cluster"] == True)
+            ].shape[0],
+            "TN": df[
+                (df["is_pito"] == False) & (df["is_pito_most_common_cluster"] == False)
+            ].shape[0],
+            "FP": df[
+                (df["is_pito"] == False) & (df["is_pito_most_common_cluster"] == True)
+            ].shape[0],
+            "FN": df[
+                (df["is_pito"] == True) & (df["is_pito_most_common_cluster"] == False)
+            ].shape[0],
+        }
+        all_f1s = list(bible_f1s.values()) + [pito_f1]
     macro_f1 = np.mean(all_f1s)
-    return macro_f1, pito_cluster, confusion_dict, bible_f1s
+    return macro_f1, pito_cluster, confusion_dict, bible_f1s, bible_clusters
 
 
 def run_experiments(param_combos: List[dict], df: pd.DataFrame) -> tuple:
@@ -453,7 +479,9 @@ def run_experiments(param_combos: List[dict], df: pd.DataFrame) -> tuple:
             X=X,
             **params,
         )
-        f1, pito_cluster, conf_dict, bible_f1s = get_results_info(pred_labels, df)
+        f1, pito_cluster, conf_dict, bible_f1s, bible_clusters = get_results_info(
+            pred_labels, df
+        )
         print(f"🧪 - F1: {f1:.2f} - NCls: {len(set(pred_labels))} - Prms: {params}")
         if f1 > best_f1:
             best_f1 = f1
@@ -466,7 +494,14 @@ def run_experiments(param_combos: List[dict], df: pd.DataFrame) -> tuple:
     df["cluster"] = best_lbls
     print("...")
     print(f"🏆 - F1: {best_f1:.2f} - NCls: {len(set(best_lbls))} - Prms: {best_prms}")
-    return best_f1, best_pito_cluster, best_conf_dict, best_bible_f1s, best_clusterer
+    return (
+        best_f1,
+        best_pito_cluster,
+        best_conf_dict,
+        best_bible_f1s,
+        best_clusterer,
+        bible_clusters,
+    )
 
 
 def get_centroids(df: pd.DataFrame) -> Dict[int, np.ndarray]:
@@ -487,27 +522,37 @@ def get_closest_centroid_distance(x: np.ndarray, centroids: Dict[int, np.ndarray
 
 PARAM_COMBOS = [
     {
-        "proportion_weighted": 0.85,
+        "proportion_weighted": 0.5,  # 0.8
         "n_umap_components": 75,
         "n_lda_components": None,
         "min_clusters": 14,
         "max_clusters": 50,
         "p_percentile": 0.89,
-        "gaussian_blur_sigma": 0.3,
+        "gaussian_blur_sigma": 0.218,
         "max_spectral_size": 8_000,
     },
 ]
 
 
+###################
+# RUN EXPERIMENTS #
+###################
+
 df = load_data()
 X = df["speaker_embedding"].tolist()
-f1, pito_cluster, conf_dict, bible_f1s, clusterer = run_experiments(PARAM_COMBOS, df)
+f1, pito_cluster, conf_dict, bible_f1s, clusterer, bible_clusters = run_experiments(
+    PARAM_COMBOS, df
+)
 
-print("📋 Pito Confusion Matrix:")
-print("\t❌ Predicted Pito but was something else (FP): " + str(conf_dict["FP"]))
-print("\t❌ Predicted something else but was Pito (FN): " + str(conf_dict["FN"]))
-print("\t✅ Predicted Pito and was Pito (TP): " + str(conf_dict["TP"]))
-print("👨 Pito Cluster:", pito_cluster)
+if not EXCLUDE_PITO:
+    print("📋 Pito Confusion Matrix:")
+    print("\t❌ Predicted Pito but was something else (FP): " + str(conf_dict["FP"]))
+    print("\t❌ Predicted something else but was Pito (FN): " + str(conf_dict["FN"]))
+    print("\t✅ Predicted Pito and was Pito (TP): " + str(conf_dict["TP"]))
+    print("👨 Pito Cluster:", pito_cluster)
+print("📖 Bible Clusters:")
+for speaker, cluster in bible_clusters.items():
+    print(f"\t{speaker}: {cluster}")
 print("📖 Bible F1s:")
 for speaker, f1 in bible_f1s.items():
     print(f"\t{speaker}: {f1:.2f}")
@@ -518,21 +563,103 @@ centroids = get_centroids(df)
 df["degree_of_uncertainty"] = df["speaker_embedding"].apply(
     lambda x: get_closest_centroid_distance(x, centroids)
 )
-df["degree_of_uncertainty"] = MinMaxScaler().fit_transform(df["degree_of_uncertainty"].values.reshape(-1, 1)).flatten()
-df.to_csv("clustered_corpus.csv", index=False)
+df["degree_of_uncertainty"] = (
+    MinMaxScaler()
+    .fit_transform(df["degree_of_uncertainty"].values.reshape(-1, 1))
+    .flatten()
+)
+df.drop(columns=["speaker_embedding"]).to_csv("clustered_corpus.csv", index=False)
 
+##########################
+# PLOT FINAL DIARIZATION #
+##########################
 
-####################################
-# LISTENING TO CLUSTERS ON THE FLY #
-####################################
+cluster_labels = df["cluster"].unique()
+cluster_w_speaker_classes = {}
+for cluster_label in cluster_labels:
+    speaker_classes = []
+    if cluster_label == pito_cluster:
+        speaker_classes.append("Pito Salas")
+    for speaker, cluster in bible_clusters.items():
+        if cluster == cluster_label:
+            speaker_classes.append(speaker.split("_")[1].title())
+    speaker_classes = "\n".join(speaker_classes)
+    val = f"{cluster_label}\n{speaker_classes}"
+    cluster_w_speaker_classes[cluster_label] = val
+df["speaker_classes_of_cluster"] = df["cluster"].map(cluster_w_speaker_classes)
 
-# cluster_labels = df["cluster"].unique()
-# user_input = input("pick a cluster to listen to:")
-# selected_cluster = int(user_input)
-# while selected_cluster in cluster_labels:
-#     fnames = df[df["cluster"] == selected_cluster]["file_name"].tolist()
-#     fpaths = [os.path.join("corpus_audio", fname) for fname in fnames]
-#     for fpath in fpaths:
-#         play_fast_snippet_of_wav(fpath)
-#     user_input = input("pick a cluster to listen to:")
-#     selected_cluster = int(user_input)
+df["author"] = df["speaker"].apply(lambda x: x.split("_")[1].title() if "_" in x else x)
+df["author"] = df["author"].apply(lambda x: f"author: {x}" if x != "Pito Salas" else x)
+plot_diarization(df)
+
+##########################################
+# LABEL UNCERTAIN AS BAD, IGNORE, & KEEP #
+##########################################
+
+user_input = input("Would you like to label uncertain utterances? (y/n):")
+if user_input == "y":
+    uncertain_df = df[df["degree_of_uncertainty"] > 0.5]
+    uncertain_df = uncertain_df.sort_values(by="degree_of_uncertainty", ascending=False)
+    ignore, keep, bad = [], [], []
+    for i, row in uncertain_df.iterrows():
+        fpath = os.path.join("corpus_audio", row["file_name"])
+        print(f"📝 {row['utterance_id']}--{row['duration_ms'] / 1000:.2f}s")
+        play_fast_snippet_of_wav(fpath, begin_ms=1, end_ms=-1, speed=1)
+        given_input = input(
+            "Select one: finish labeling (f), ignore (i), keep (k), bad (b):"
+        )
+        if given_input == "f":
+            break
+        elif given_input == "i":
+            ignore.append(row["utterance_id"])
+        elif given_input == "k":
+            keep.append(row["utterance_id"])
+        elif given_input == "b":
+            bad.append(row["utterance_id"])
+    print("📋 Bad:")
+    print(bad)
+    print("📋 Ignore:")
+    print(ignore)
+
+########################################################
+# LISTENING TO/ASSESING QUALITY OF CLUSTERS ON THE FLY #
+########################################################
+
+user_input = input("Would you like to listen to a speaker cluster? (y/n):")
+if user_input == "y":
+    user_input = input("Pick a cluster to listen to:")
+    n_seconds = input("For how many seconds would like to listen?")
+    n_seconds = int(n_seconds)
+    selected_cluster = int(user_input)
+    while selected_cluster in cluster_labels:
+        fnames = df[df["cluster"] == selected_cluster]["file_name"]
+        fnames = fnames.sample(len(fnames)).to_list()
+        fpaths = [os.path.join("corpus_audio", fname) for fname in fnames]
+        n_files_to_listen_to = int(n_seconds / 2)
+        for fpath in fpaths[:n_files_to_listen_to]:
+            play_fast_snippet_of_wav(fpath, begin_ms=1000, end_ms=3000)
+        user_input = input("Pick a cluster to listen to (f=finish):")
+        if user_input == "f":
+            break
+        selected_cluster = int(user_input)
+chosen_dev_cluster = input("Pick a cluster to use for dev set:")
+
+#####################
+# SAVING NEW CORPUS #
+#####################
+try:
+    BAD_UTTERANCES.update(bad)
+except NameError:
+    pass
+new_df = _DF.copy()
+new_df = new_df[~new_df["utterance_id"].isin(BAD_UTTERANCES)]
+new_df.set_index("utterance_id", inplace=True)
+df.set_index("utterance_id", inplace=True)
+new_df["diarized_speaker"] = df["cluster"]
+new_df.reset_index(inplace=True)
+new_df['train_dev_test_split'] = 'train'  # default to 'train'
+new_df.loc[new_df['diarized_speaker'] == int(chosen_dev_cluster), 'train_dev_test_split'] = 'dev'
+new_df.loc[new_df['speaker'] == 'Pito Salas', 'train_dev_test_split'] = 'test'
+new_df.to_csv("diarized_corpus.csv", index=False)
+print(new_df['train_dev_test_split'].value_counts())
+print("👷 Done!")
